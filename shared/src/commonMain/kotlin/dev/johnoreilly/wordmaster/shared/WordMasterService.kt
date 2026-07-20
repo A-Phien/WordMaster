@@ -9,7 +9,6 @@ import okio.Path.Companion.toPath
 import dev.johnoreilly.wordmaster.shared.LetterStatus.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.flow.StateFlow
 import okio.SYSTEM
 
 
@@ -23,6 +22,7 @@ class WordMasterService(wordsFilePath: String) {
     val coroutineScope: CoroutineScope = MainScope()
 
     private val validWords = mutableListOf<String>()
+    private val validWordsSet = mutableSetOf<String>()
 
     var answer = ""
     var currentGuessAttempt = 0
@@ -39,6 +39,14 @@ class WordMasterService(wordsFilePath: String) {
     @NativeCoroutines
     val lastGuessCorrect: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
+    // Best-known status for each letter typed so far, used to colour the on-screen keyboard.
+    @NativeCoroutines
+    val keyStatus: MutableStateFlow<Map<String, LetterStatus>> = MutableStateFlow(emptyMap())
+
+    // Transient message shown to the user when a guess is rejected (e.g. too short / not a word).
+    @NativeCoroutines
+    val guessError: MutableStateFlow<String?> = MutableStateFlow(null)
+
 
     init {
         println("wordsFilePath = $wordsFilePath")
@@ -52,6 +60,8 @@ class WordMasterService(wordsFilePath: String) {
         println("answer! = $answer")
         revealedAnswer.value = null
         lastGuessCorrect.value = false
+        keyStatus.value = emptyMap()
+        guessError.value = null
 
         // set default values for guesses/letter status info
         val newBoardStatus = arrayListOf<ArrayList<LetterStatus>>()
@@ -69,6 +79,56 @@ class WordMasterService(wordsFilePath: String) {
         }
         boardStatus.value = newBoardStatus
         boardGuesses.value = newBoardGuesses
+    }
+
+    private fun isGameFinished(): Boolean =
+        lastGuessCorrect.value || currentGuessAttempt >= MAX_NUMBER_OF_GUESSES
+
+    fun isValidWord(word: String): Boolean = validWordsSet.contains(word.uppercase())
+
+    // Append a letter to the next empty cell of the current guess row.
+    fun addLetter(letter: String) {
+        if (isGameFinished()) return
+        val character = letter.uppercase().take(1)
+        if (character.isEmpty()) return
+
+        val row = boardGuesses.value[currentGuessAttempt]
+        val column = row.indexOfFirst { it.isEmpty() }
+        if (column == -1) return
+
+        setGuess(currentGuessAttempt, column, character)
+    }
+
+    // Clear the last filled cell of the current guess row.
+    fun removeLetter() {
+        if (isGameFinished()) return
+
+        val row = boardGuesses.value[currentGuessAttempt]
+        val column = row.indexOfLast { it.isNotEmpty() }
+        if (column == -1) return
+
+        setGuess(currentGuessAttempt, column, "")
+    }
+
+    fun clearGuessError() {
+        guessError.value = null
+    }
+
+    // Validate the current row and, if it's a legal word, evaluate it.
+    fun submitGuess() {
+        if (isGameFinished()) return
+
+        val currentGuess = boardGuesses.value[currentGuessAttempt].joinToString("")
+        if (currentGuess.length < NUMBER_LETTERS) {
+            guessError.value = "Not enough letters"
+            return
+        }
+        if (!isValidWord(currentGuess)) {
+            guessError.value = "Not in word list"
+            return
+        }
+        guessError.value = null
+        checkGuess()
     }
 
     fun setGuess(guessAttempt: Int, character: Int, guess: String) {
@@ -94,6 +154,8 @@ class WordMasterService(wordsFilePath: String) {
             currentStatusCopy[currentGuessAttempt] = status
             boardStatus.value = currentStatusCopy
 
+            updateKeyStatus(currentGuess, status)
+
             val isCorrect = status.all { it == CORRECT_POSITION }
             if ( isCorrect ) {
                 lastGuessCorrect.value = true
@@ -105,6 +167,27 @@ class WordMasterService(wordsFilePath: String) {
                 revealedAnswer.value = answer
             }
         }
+    }
+
+    // Merge the latest guess result into the per-letter keyboard status, only ever upgrading
+    // (NOT_IN_WORD -> INCORRECT_POSITION -> CORRECT_POSITION).
+    private fun updateKeyStatus(guess: String, status: ArrayList<LetterStatus>) {
+        val newKeyStatus = keyStatus.value.toMutableMap()
+        guess.forEachIndexed { index, char ->
+            val letter = char.toString()
+            val newStatus = status[index]
+            if (statusRank(newStatus) > statusRank(newKeyStatus[letter])) {
+                newKeyStatus[letter] = newStatus
+            }
+        }
+        keyStatus.value = newKeyStatus
+    }
+
+    private fun statusRank(status: LetterStatus?): Int = when (status) {
+        CORRECT_POSITION -> 3
+        INCORRECT_POSITION -> 2
+        NOT_IN_WORD -> 1
+        else -> 0
     }
 
     private fun checkWord(guess: String): ArrayList<LetterStatus> {
@@ -143,6 +226,7 @@ class WordMasterService(wordsFilePath: String) {
             while (true) {
                 val word = this.readUtf8Line() ?: break
                 validWords.add(word)
+                validWordsSet.add(word.uppercase())
             }
         }
     }

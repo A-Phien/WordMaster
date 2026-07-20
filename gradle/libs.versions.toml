@@ -1,20 +1,20 @@
 [versions]
-kotlin = "2.2.0"
-ksp = "2.2.0-2.0.2"
-kotlinx-coroutines = "1.10.2"
+kotlin = "2.4.10"
+ksp = "2.3.10"
+kotlinx-coroutines = "1.11.0"
 
 
-agp = "8.12.0"
-android-compileSdk = "36"
+agp = "9.1.1"
+android-compileSdk = "37"
 android-minSdk = "24"
-android-targetSdk = "36"
-androidx-activityCompose = "1.10.1"
-androidxComposeBom = "2025.08.00"
-compose-plugin = "1.8.2"
-kmp-nativecoroutines = "1.0.0-ALPHA-45"
-okio = "3.16.0"
+android-targetSdk = "37"
+androidx-activityCompose = "1.13.0"
+androidxComposeBom = "2026.06.01"
+compose-plugin = "1.11.1"
+kmp-nativecoroutines = "1.0.5"
+okio = "3.17.0"
 junit = "4.13.2"
-androidxLifecycle = "2.8.6"
+androidxLifecycle = "2.11.0"
 
 [libraries]
 junit = { module = "junit:junit", version.ref = "junit" }
@@ -35,7 +35,7 @@ okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
-androidLibrary = { id = "com.android.library", version.ref = "agp" }
+androidKmpLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 jetbrainsCompose = { id = "org.jetbrains.compose", version.ref = "compose-plugin" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

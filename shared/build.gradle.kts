@@ -1,12 +1,21 @@
 plugins {
     kotlin("multiplatform")
-    id("com.android.library")
+    alias(libs.plugins.androidKmpLibrary)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kmpNativeCoroutines)
 }
 
 kotlin {
-    androidTarget()
+    android {
+        namespace = "dev.johnoreilly.wordmaster.shared"
+
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
+
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
     jvm()
 
     listOf(
@@ -29,19 +38,6 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(kotlin("test"))
         }
-    }
-}
-
-android {
-    namespace = "dev.johnoreilly.wordmaster.shared"
-
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
     }
 }
 

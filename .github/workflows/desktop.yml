@@ -1,4 +1,4 @@
-name: Android CI
+name: Compose Desktop CI
 
 on: [push, pull_request]
 
@@ -14,7 +14,5 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: 17
-    - name: Build Android client
-      run: ./gradlew assembleDebug
-    - name: Run shared tests
-      run: ./gradlew :shared:jvmTest
+    - name: Build Compose Desktop client
+      run: ./gradlew :compose-desktop:assemble
