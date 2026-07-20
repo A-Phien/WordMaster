@@ -34,3 +34,6 @@ gradle-app.setting
 xcschememanagement.plist
 *.xcbkptlist
 /wearApp/build/
+
+# Kotlin build/session cache
+.kotlin/

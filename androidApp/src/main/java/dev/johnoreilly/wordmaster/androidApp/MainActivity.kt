@@ -1,51 +1,37 @@
 package dev.johnoreilly.wordmaster.androidApp
 
-import android.annotation.SuppressLint
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Arrangement.Absolute.Center
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.type
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.johnoreilly.wordmaster.androidApp.theme.WordMasterTheme
 import dev.johnoreilly.wordmaster.shared.LetterStatus
 import dev.johnoreilly.wordmaster.shared.WordMasterService
-import dev.johnoreilly.wordmaster.androidApp.theme.WordMasterTheme
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 
 class MainActivity : ComponentActivity() {
@@ -61,19 +47,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@SuppressLint("UnusedMaterialScaffoldPaddingParameter")
 @Composable
 fun MainLayout() {
+    val snackbarHostState = remember { SnackbarHostState() }
     Scaffold(
-        topBar = { WordMasterTopAppBar("WordMaster KMP") }
+        topBar = { WordMasterTopAppBar("WordMaster KMP") },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
-        WordMasterView(Modifier.padding(innerPadding).imePadding())
+        WordMasterView(Modifier.padding(innerPadding).imePadding(), snackbarHostState)
     }
 }
 
 
 @Composable
-fun WordMasterView(padding: Modifier) {
+fun WordMasterView(padding: Modifier, snackbarHostState: SnackbarHostState) {
     val context = LocalContext.current
 
     val wordMasterService = remember {
@@ -83,204 +70,174 @@ fun WordMasterView(padding: Modifier) {
 
     val boardGuesses by wordMasterService.boardGuesses.collectAsStateWithLifecycle()
     val boardStatus by wordMasterService.boardStatus.collectAsStateWithLifecycle()
+    val keyStatus by wordMasterService.keyStatus.collectAsStateWithLifecycle()
     val revealedAnswer by wordMasterService.revealedAnswer.collectAsStateWithLifecycle()
     val lastGuessCorrect by wordMasterService.lastGuessCorrect.collectAsStateWithLifecycle()
+    val guessError by wordMasterService.guessError.collectAsStateWithLifecycle()
 
-    val focusManager = LocalFocusManager.current
-    // FocusRequesters for every cell to enable precise intra-row navigation (e.g., Backspace behavior)
-    val cellRequesters = remember {
-        List(WordMasterService.MAX_NUMBER_OF_GUESSES) { List(WordMasterService.NUMBER_LETTERS) { FocusRequester() } }
+    // Horizontal shake offset applied to the active row when a guess is rejected.
+    val shakeOffset = remember { Animatable(0f) }
+    LaunchedEffect(guessError) {
+        val error = guessError ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(error)
+        val shift = 16f
+        for (step in listOf(-shift, shift, -shift, shift, -shift / 2, shift / 2, 0f)) {
+            shakeOffset.animateTo(step)
+        }
+        wordMasterService.clearGuessError()
     }
 
-    Row(padding.fillMaxSize().padding(16.dp), horizontalArrangement = Center, verticalAlignment = Alignment.CenterVertically) {
-
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            for (guessAttempt in 0 until WordMasterService.MAX_NUMBER_OF_GUESSES) {
-                Row(horizontalArrangement = Arrangement.Center) {
-                    for (character in 0 until WordMasterService.NUMBER_LETTERS) {
-                        Column(
-                            Modifier.padding(4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-
-                            var modifier = Modifier.width(55.dp).height(55.dp).focusRequester(cellRequesters[guessAttempt][character])
-
-                            TextField(
-                                value = boardGuesses[guessAttempt][character],
-                                onValueChange = { newValue ->
-                                    if (guessAttempt == wordMasterService.currentGuessAttempt) {
-                                        val upper = newValue.uppercase()
-                                        val capped = if (upper.length > 1) upper.substring(0, 1) else upper
-                                        val previous = boardGuesses[guessAttempt][character]
-
-                                        if (capped != previous) {
-                                            wordMasterService.setGuess(
-                                                guessAttempt,
-                                                character,
-                                                capped
-                                            )
-                                        }
-
-                                        if (capped.isNotEmpty()) {
-                                            if (character < WordMasterService.NUMBER_LETTERS - 1) {
-                                                // Advance to next column in the same row
-                                                focusManager.moveFocus(FocusDirection.Next)
-                                            }
-                                        } else {
-                                            // If we deleted the last character in this cell, move back to previous cell in same row
-                                            if (previous.isNotEmpty() && character > 0) {
-                                                cellRequesters[guessAttempt][character - 1].requestFocus()
-                                            }
-                                        }
-                                    }
-                                },
-                                modifier = modifier
-                                    .onPreviewKeyEvent {
-                                        if (guessAttempt == wordMasterService.currentGuessAttempt && (it.key == Key.Backspace || it.key == Key.Delete) && it.type == KeyEventType.KeyDown) {
-                                            val currentVal = boardGuesses[guessAttempt][character]
-                                            if (currentVal.isEmpty() && character > 0) {
-                                                cellRequesters[guessAttempt][character - 1].requestFocus()
-                                                return@onPreviewKeyEvent true
-                                            }
-                                        }
-                                        false
-                                    }
-                                    .onKeyEvent {
-                                        if (it.type == KeyEventType.KeyUp && it.key == Key.Backspace) {
-                                            if (guessAttempt == wordMasterService.currentGuessAttempt) {
-                                                val currentVal = boardGuesses[guessAttempt][character]
-                                                if (currentVal.isEmpty() && character > 0) {
-                                                    cellRequesters[guessAttempt][character - 1].requestFocus()
-                                                    return@onKeyEvent true
-                                                }
-                                            }
-                                        } else if (it.type == KeyEventType.KeyUp && (it.key == Key.Enter || it.key == Key.NumPadEnter)) {
-                                            if (guessAttempt == wordMasterService.currentGuessAttempt) {
-                                                var filled = true
-                                                for (c in 0 until WordMasterService.NUMBER_LETTERS) {
-                                                    if (boardGuesses[guessAttempt][c].isEmpty()) { filled = false; break }
-                                                }
-                                                if (filled) {
-                                                    wordMasterService.checkGuess()
-                                                    // After submitting a guess, move focus to the next row's first cell
-                                                    focusManager.moveFocus(FocusDirection.Next)
-                                                    return@onKeyEvent true
-                                                }
-                                            }
-                                        }
-                                        false
-                                    }
-                                .border(1.dp, Color.Black.copy(alpha = 0.6f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(
-                                    capitalization = KeyboardCapitalization.Characters,
-                                    imeAction = ImeAction.Done
-                                ),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        if (guessAttempt == wordMasterService.currentGuessAttempt) {
-                                            var filled = true
-                                            for (c in 0 until WordMasterService.NUMBER_LETTERS) {
-                                                if (boardGuesses[guessAttempt][c].isEmpty()) { filled = false; break }
-                                            }
-                                            if (filled) {
-                                                wordMasterService.checkGuess()
-                                                // After submitting a guess, move focus to the next row's first cell
-                                                focusManager.moveFocus(FocusDirection.Next)
-                                            }
-                                        }
-                                    }
-                                ),
-                                textStyle = TextStyle(fontSize = 14.sp, textAlign = TextAlign.Center),
-                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
-                                colors = TextFieldDefaults.colors(
-                                    focusedTextColor = mapLetterStatusToTextColor(boardStatus[guessAttempt][character]),
-                                    unfocusedTextColor = mapLetterStatusToTextColor(boardStatus[guessAttempt][character]),
-                                    disabledTextColor = mapLetterStatusToTextColor(boardStatus[guessAttempt][character]),
-                                    cursorColor = mapLetterStatusToTextColor(boardStatus[guessAttempt][character]),
-                                    focusedContainerColor = mapLetterStatusToBackgroundColor(boardStatus[guessAttempt][character]),
-                                    unfocusedContainerColor = mapLetterStatusToBackgroundColor(boardStatus[guessAttempt][character]),
-                                    disabledContainerColor = mapLetterStatusToBackgroundColor(boardStatus[guessAttempt][character]),
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                    disabledIndicatorColor = Color.Transparent,
-                                    errorIndicatorColor = Color.Transparent,
-                                ),
-                            )
-
-                            if (guessAttempt == 0 && character == 0) {
-                                DisposableEffect(Unit) {
-                                    cellRequesters[0][0].requestFocus()
-                                    onDispose { }
-                                }
-                            }
-                        }
-                    }
+    Column(
+        padding.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        for (guessAttempt in 0 until WordMasterService.MAX_NUMBER_OF_GUESSES) {
+            val rowModifier = if (guessAttempt == wordMasterService.currentGuessAttempt) {
+                Modifier.offset { androidx.compose.ui.unit.IntOffset(shakeOffset.value.toInt(), 0) }
+            } else {
+                Modifier
+            }
+            Row(rowModifier, horizontalArrangement = Arrangement.Center) {
+                for (character in 0 until WordMasterService.NUMBER_LETTERS) {
+                    LetterTile(
+                        letter = boardGuesses[guessAttempt][character],
+                        status = boardStatus[guessAttempt][character]
+                    )
                 }
             }
+        }
 
-            Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(16.dp))
 
-            if (revealedAnswer != null) {
-                Text(
-                    text = "Answer: $revealedAnswer",
-                    style = TextStyle(fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface)
-                )
-                Spacer(Modifier.height(12.dp))
-            }
+        if (revealedAnswer != null) {
+            Text(
+                text = "Answer: $revealedAnswer",
+                fontSize = 18.sp,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(12.dp))
+        }
 
+        Keyboard(
+            keyStatus = keyStatus,
+            onLetter = { wordMasterService.addLetter(it) },
+            onEnter = { wordMasterService.submitGuess() },
+            onDelete = { wordMasterService.removeLetter() }
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Button(onClick = { wordMasterService.resetGame() }) {
+            Text("New Game")
+        }
+
+        if (lastGuessCorrect) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { },
+                title = { Text("You win!") },
+                text = { Text("Great job guessing the word.") },
+                confirmButton = {
+                    Button(onClick = { wordMasterService.resetGame() }) {
+                        Text("OK")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LetterTile(letter: String, status: LetterStatus) {
+    Box(
+        Modifier
+            .padding(3.dp)
+            .size(52.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(mapLetterStatusToBackgroundColor(status))
+            .border(1.5.dp, Color.Black.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = letter,
+            color = mapLetterStatusToTextColor(status),
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+private val KEYBOARD_ROWS = listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
+
+@Composable
+private fun Keyboard(
+    keyStatus: Map<String, LetterStatus>,
+    onLetter: (String) -> Unit,
+    onEnter: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        KEYBOARD_ROWS.forEachIndexed { index, row ->
             Row(horizontalArrangement = Arrangement.Center) {
-                Button(onClick = {
-                    // Only submit and advance focus if the current row is filled
-                    val current = wordMasterService.currentGuessAttempt
-                    var filled = true
-                    for (c in 0 until WordMasterService.NUMBER_LETTERS) {
-                        if (boardGuesses[current][c].isEmpty()) { filled = false; break }
-                    }
-                    if (filled) {
-                        wordMasterService.checkGuess()
-                        // Move focus to next row's first cell
-                        focusManager.moveFocus(FocusDirection.Next)
-                    }
-                }) {
-                    Text("Guess")
+                if (index == KEYBOARD_ROWS.size - 1) {
+                    KeyButton("ENTER", onClick = onEnter, flexWidth = true)
                 }
-                Spacer(Modifier.width(16.dp))
-                Button(onClick = {
-                    wordMasterService.resetGame()
-                    cellRequesters[0][0].requestFocus()
-                }) {
-                    Text("New Game")
+                row.forEach { char ->
+                    val letter = char.toString()
+                    KeyButton(
+                        label = letter,
+                        onClick = { onLetter(letter) },
+                        status = keyStatus[letter] ?: LetterStatus.UNGUESSED
+                    )
                 }
-            }
-
-            if (lastGuessCorrect) {
-                androidx.compose.material3.AlertDialog(
-                    onDismissRequest = { /* keep dialog until OK pressed */ },
-                    title = { Text("You win!") },
-                    text = { Text("Great job guessing the word.") },
-                    confirmButton = {
-                        Button(onClick = {
-                            wordMasterService.resetGame()
-                            // Re-focus first cell after reset
-                            cellRequesters[0][0].requestFocus()
-                        }) {
-                            Text("OK")
-                        }
-                    }
-                )
+                if (index == KEYBOARD_ROWS.size - 1) {
+                    KeyButton("DEL", onClick = onDelete, flexWidth = true)
+                }
             }
         }
     }
+}
 
+@Composable
+private fun KeyButton(
+    label: String,
+    onClick: () -> Unit,
+    status: LetterStatus = LetterStatus.UNGUESSED,
+    flexWidth: Boolean = false
+) {
+    val background = if (status == LetterStatus.UNGUESSED) {
+        Color(0xFFD3D6DA)
+    } else {
+        mapLetterStatusToBackgroundColor(status)
+    }
+    val textColor = if (status == LetterStatus.UNGUESSED) Color.Black else mapLetterStatusToTextColor(status)
+
+    Box(
+        Modifier
+            .padding(2.dp)
+            .height(48.dp)
+            .then(if (flexWidth) Modifier.width(52.dp) else Modifier.width(32.dp))
+            .clip(RoundedCornerShape(6.dp))
+            .background(background)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = textColor,
+            fontSize = if (flexWidth) 11.sp else 15.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
 }
 
 fun mapLetterStatusToBackgroundColor(letterStatus: LetterStatus): Color {
     return when (letterStatus) {
         LetterStatus.UNGUESSED -> Color.White
-        LetterStatus.CORRECT_POSITION -> Color(0xFF008000)
+        LetterStatus.CORRECT_POSITION -> Color(0xFF2E7D32)
         LetterStatus.INCORRECT_POSITION -> Color(0xFF9B870C)
-        LetterStatus.NOT_IN_WORD -> Color.Gray
+        LetterStatus.NOT_IN_WORD -> Color(0xFF787C7E)
     }
 }
 

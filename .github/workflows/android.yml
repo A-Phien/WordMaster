@@ -21,4 +21,4 @@ jobs:
     - name: Build iOS shared code
       run: ./gradlew :shared:compileKotlinIosArm64
     - name: Tests
-      run:  ./gradlew :shared:testDebugUnitTest
+      run:  ./gradlew :shared:jvmTest
