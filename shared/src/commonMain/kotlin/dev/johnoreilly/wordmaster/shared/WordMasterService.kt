@@ -16,6 +16,23 @@ enum class LetterStatus {
     UNGUESSED, CORRECT_POSITION, INCORRECT_POSITION, NOT_IN_WORD
 }
 
+enum class GameStatus {
+    PLAYING, WON, LOST
+}
+
+data class GameStats(
+    val gamesPlayed: Int = 0,
+    val wins: Int = 0,
+    val losses: Int = 0,
+    val currentStreak: Int = 0,
+    val maxStreak: Int = 0,
+    val totalScore: Int = 0,
+    val guessDistribution: Map<Int, Int> = emptyMap()
+) {
+    val winRate: Int
+        get() = if (gamesPlayed == 0) 0 else (wins * 100) / gamesPlayed
+}
+
 
 class WordMasterService(wordsFilePath: String) {
     @NativeCoroutineScope
@@ -39,6 +56,15 @@ class WordMasterService(wordsFilePath: String) {
     @NativeCoroutines
     val lastGuessCorrect: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
+    @NativeCoroutines
+    val gameStatus: MutableStateFlow<GameStatus> = MutableStateFlow(GameStatus.PLAYING)
+
+    @NativeCoroutines
+    val currentScore: MutableStateFlow<Int> = MutableStateFlow(0)
+
+    @NativeCoroutines
+    val gameStats: MutableStateFlow<GameStats> = MutableStateFlow(GameStats())
+
     // Best-known status for each letter typed so far, used to colour the on-screen keyboard.
     @NativeCoroutines
     val keyStatus: MutableStateFlow<Map<String, LetterStatus>> = MutableStateFlow(emptyMap())
@@ -57,9 +83,10 @@ class WordMasterService(wordsFilePath: String) {
     fun resetGame() {
         currentGuessAttempt = 0
         answer = validWords.random().uppercase()
-        println("answer! = $answer")
         revealedAnswer.value = null
         lastGuessCorrect.value = false
+        gameStatus.value = GameStatus.PLAYING
+        currentScore.value = 0
         keyStatus.value = emptyMap()
         guessError.value = null
 
@@ -114,6 +141,40 @@ class WordMasterService(wordsFilePath: String) {
         guessError.value = null
     }
 
+    fun revealAnswerForDebug() {
+        revealedAnswer.value = answer
+    }
+
+    fun fillAnswerForDebug() {
+        if (isGameFinished()) return
+        setCurrentGuess(answer)
+    }
+
+    fun winNowForDebug() {
+        if (isGameFinished()) return
+        setCurrentGuess(answer)
+        checkGuess()
+    }
+
+    fun loseNowForDebug() {
+        if (isGameFinished()) return
+
+        val losingWord = validWords
+            .map { it.uppercase() }
+            .firstOrNull { it.length == NUMBER_LETTERS && it != answer }
+            ?: return
+
+        while (!isGameFinished()) {
+            setCurrentGuess(losingWord)
+            checkGuess()
+        }
+    }
+
+    fun resetStatsForDebug() {
+        gameStats.value = GameStats()
+        currentScore.value = 0
+    }
+
     // Validate the current row and, if it's a legal word, evaluate it.
     fun submitGuess() {
         if (isGameFinished()) return
@@ -145,6 +206,13 @@ class WordMasterService(wordsFilePath: String) {
         boardGuesses.value = newBoardGuesses
     }
 
+    private fun setCurrentGuess(word: String) {
+        val letters = word.uppercase().take(NUMBER_LETTERS)
+        for (index in 0 until NUMBER_LETTERS) {
+            setGuess(currentGuessAttempt, index, letters.getOrNull(index)?.toString() ?: "")
+        }
+    }
+
     fun checkGuess() {
         val currentGuess = boardGuesses.value[currentGuessAttempt].joinToString("")
         if (currentGuess.length == NUMBER_LETTERS) {
@@ -159,14 +227,49 @@ class WordMasterService(wordsFilePath: String) {
             val isCorrect = status.all { it == CORRECT_POSITION }
             if ( isCorrect ) {
                 lastGuessCorrect.value = true
+                gameStatus.value = GameStatus.WON
+                val guessesUsed = currentGuessAttempt + 1
+                val score = scoreForGuess(guessesUsed)
+                currentScore.value = score
+                recordWin(guessesUsed, score)
             }
             currentGuessAttempt++
 
             // Reveal the answer if all guesses are completed and the word wasn't guessed
             if (!isCorrect && currentGuessAttempt >= MAX_NUMBER_OF_GUESSES) {
                 revealedAnswer.value = answer
+                gameStatus.value = GameStatus.LOST
+                recordLoss()
             }
         }
+    }
+
+    private fun scoreForGuess(guessesUsed: Int): Int =
+        (MAX_NUMBER_OF_GUESSES - guessesUsed + 1) * 100
+
+    private fun recordWin(guessesUsed: Int, score: Int) {
+        val stats = gameStats.value
+        val newStreak = stats.currentStreak + 1
+        val newDistribution = stats.guessDistribution.toMutableMap()
+        newDistribution[guessesUsed] = (newDistribution[guessesUsed] ?: 0) + 1
+
+        gameStats.value = stats.copy(
+            gamesPlayed = stats.gamesPlayed + 1,
+            wins = stats.wins + 1,
+            currentStreak = newStreak,
+            maxStreak = maxOf(stats.maxStreak, newStreak),
+            totalScore = stats.totalScore + score,
+            guessDistribution = newDistribution
+        )
+    }
+
+    private fun recordLoss() {
+        val stats = gameStats.value
+        gameStats.value = stats.copy(
+            gamesPlayed = stats.gamesPlayed + 1,
+            losses = stats.losses + 1,
+            currentStreak = 0
+        )
     }
 
     // Merge the latest guess result into the per-letter keyboard status, only ever upgrading
