@@ -2,10 +2,6 @@ package dev.johnoreilly.wordmaster.androidApp
 
 import android.content.pm.ApplicationInfo
 import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,7 +20,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,16 +27,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.johnoreilly.wordmaster.shared.AppStrings
 import dev.johnoreilly.wordmaster.shared.GameStatus
 import dev.johnoreilly.wordmaster.shared.LetterStatus
 import dev.johnoreilly.wordmaster.shared.WordMasterService
@@ -52,8 +42,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun GameScreen(
     wordMasterService: WordMasterService,
+    strings: AppStrings,
     snackbarHostState: SnackbarHostState,
-    onStats: () -> Unit
+    onStats: () -> Unit,
+    onResetStats: () -> Unit = { wordMasterService.resetStatsForDebug() }
 ) {
     val boardGuesses by wordMasterService.boardGuesses.collectAsStateWithLifecycle()
     val boardStatus by wordMasterService.boardStatus.collectAsStateWithLifecycle()
@@ -66,13 +58,22 @@ fun GameScreen(
     val isDebugBuild = LocalContext.current.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     var showDevTools by remember { mutableStateOf(false) }
 
+    // ── Hint state ────────────────────────────────────────────────────────────
+    val vowelHintUsed by wordMasterService.vowelHintUsed.collectAsStateWithLifecycle()
+    val letterHintUsed by wordMasterService.letterHintUsed.collectAsStateWithLifecycle()
+    val aiHintUsed by wordMasterService.aiHintUsed.collectAsStateWithLifecycle()
+    val isAiThinking by wordMasterService.isAiThinking.collectAsStateWithLifecycle()
+    val isValidatingWord by wordMasterService.isValidatingWord.collectAsStateWithLifecycle()
+    val hintMessages by wordMasterService.hintMessages.collectAsStateWithLifecycle()
+    var showHintDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    // ─────────────────────────────────────────────────────────────────────────
+
     // ── Flip-animation state ─────────────────────────────────────────────────
     // Counts how many rows have been fully scored (all tiles != UNGUESSED).
     // Wrapped in derivedStateOf so it recomputes reactively whenever boardStatus changes.
-    val scoredRowsCount by remember {
-        derivedStateOf {
-            boardStatus.count { row -> row.all { it != LetterStatus.UNGUESSED } }
-        }
+    val scoredRowsCount = boardStatus.count { row ->
+        row.all { it != LetterStatus.UNGUESSED }
     }
     // Index of the row whose tiles are currently flipping (-1 = none).
     var animatingRowIndex by remember { mutableStateOf<Int?>(null) }
@@ -129,11 +130,14 @@ fun GameScreen(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                StatTile("Score", currentScore.toString(), Modifier.weight(1f))
-                StatTile("Streak", stats.currentStreak.toString(), Modifier.weight(1f))
-                AiHintButton(
-                    enabled = gameStatus == GameStatus.PLAYING,
-                    onClick = { snackbarHostState.showSnackbar("AI hints are coming next.") }
+                StatTile(strings.score, currentScore.toString(), Modifier.weight(1f))
+                StatTile(strings.streak, stats.currentStreak.toString(), Modifier.weight(1f))
+                HintButton(
+                    hintsAvailable = !vowelHintUsed || !letterHintUsed || !aiHintUsed,
+                    gameActive = gameStatus == GameStatus.PLAYING,
+                    strings = strings,
+                    isAiThinking = isAiThinking,
+                    onClick = { showHintDialog = true }
                 )
             }
 
@@ -166,34 +170,50 @@ fun GameScreen(
                 }
             }
 
+            // Hint messages (shown below the board when hints are used)
+            HintMessagesSection(hintMessages)
+
+            // AI thinking indicator
+            if (isAiThinking) AiThinkingCard(strings)
+
             if (revealedAnswer != null) {
                 Text(
-                    text = "Answer: $revealedAnswer",
+                    text = strings.answerLabel + revealedAnswer,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.error
                 )
             }
 
+            // Inline validation indicator (only shown during online check)
+            if (isValidatingWord) {
+                WordCheckingCard(strings)
+            }
+
             Keyboard(
                 keyStatus = keyStatus,
+                enabled = !isValidatingWord,
                 onLetter = { wordMasterService.addLetter(it) },
-                onEnter = { wordMasterService.submitGuess() },
+                onEnter = {
+                    coroutineScope.launch {
+                        wordMasterService.submitGuessAsync()
+                    }
+                },
                 onDelete = { wordMasterService.removeLetter() }
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { wordMasterService.resetGame() }) {
-                    Text("New Game")
+                    Text(strings.newGame)
                 }
                 OutlinedButton(onClick = onStats) {
-                    Text("Stats")
+                    Text(strings.viewStats)
                 }
             }
 
             if (isDebugBuild) {
                 OutlinedButton(onClick = { showDevTools = !showDevTools }) {
-                    Text(if (showDevTools) "Hide Dev Tools" else "Dev Tools")
+                    Text(if (showDevTools) strings.hideDevTools else strings.devTools)
                 }
                 if (showDevTools) {
                     DevToolsPanel(
@@ -202,7 +222,7 @@ fun GameScreen(
                         onFillAnswer = { wordMasterService.fillAnswerForDebug() },
                         onAutoWin = { wordMasterService.winNowForDebug() },
                         onAutoLose = { wordMasterService.loseNowForDebug() },
-                        onResetStats = { wordMasterService.resetStatsForDebug() }
+                        onResetStats = onResetStats
                     )
                 }
             }
@@ -217,29 +237,34 @@ fun GameScreen(
             guessesUsed = wordMasterService.currentGuessAttempt,
             answer = revealedAnswer ?: wordMasterService.answer,
             boardStatus = boardStatus,
+            strings = strings,
             onPlayAgain = { wordMasterService.resetGame() },
             onStats = onStats
         )
     }
-}
 
-@Composable
-private fun AiHintButton(enabled: Boolean, onClick: suspend () -> Unit) {
-    val coroutineScope = rememberCoroutineScope()
-    Box(
-        Modifier
-            .size(74.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (enabled) Color(0xFFF8F4E8) else Color(0xFFE5E1D8))
-            .border(1.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(18.dp))
-            .clickable(enabled = enabled) { coroutineScope.launch { onClick() } },
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            painter = painterResource(id = R.drawable.ai_hint_icon),
-            contentDescription = "AI hint",
-            modifier = Modifier.size(42.dp),
-            contentScale = ContentScale.Fit
+    // Hint picker dialog
+    if (showHintDialog) {
+        HintSelectionDialog(
+            vowelHintUsed = vowelHintUsed,
+            letterHintUsed = letterHintUsed,
+            aiHintUsed = aiHintUsed,
+            strings = strings,
+            onVowelHint = {
+                wordMasterService.useVowelHint()
+                showHintDialog = false
+            },
+            onLetterHint = {
+                wordMasterService.useRevealLetterHint()
+                showHintDialog = false
+            },
+            onAiSmartHint = {
+                showHintDialog = false
+                coroutineScope.launch {
+                    wordMasterService.requestAiSmartHint()
+                }
+            },
+            onDismiss = { showHintDialog = false }
         )
     }
 }

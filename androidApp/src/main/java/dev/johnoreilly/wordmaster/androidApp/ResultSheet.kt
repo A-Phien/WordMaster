@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import dev.johnoreilly.wordmaster.shared.AppStrings
 import dev.johnoreilly.wordmaster.shared.GameStatus
 import dev.johnoreilly.wordmaster.shared.LetterStatus
 import dev.johnoreilly.wordmaster.shared.WordMasterService
@@ -41,6 +42,7 @@ fun ResultSheet(
     guessesUsed: Int,
     answer: String,
     boardStatus: ArrayList<ArrayList<LetterStatus>>,
+    strings: AppStrings,
     onPlayAgain: () -> Unit,
     onStats: () -> Unit
 ) {
@@ -78,13 +80,13 @@ fun ResultSheet(
                 }
 
                 Text(
-                    text = if (won) "Victory" else "Word Revealed",
+                    text = if (won) strings.victory else strings.wordRevealed,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Black,
                     color = Color(0xFF27313B)
                 )
                 Text(
-                    text = if (won) "Solved in $guessesUsed guesses" else "The answer was $answer",
+                    text = if (won) strings.solvedIn(guessesUsed) else strings.theAnswerWas(answer),
                     color = Color(0xFF68736C),
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center
@@ -94,27 +96,25 @@ fun ResultSheet(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    GlassStatTile("Score", currentScore.toString(), Modifier.weight(1f))
-                    GlassStatTile("Guesses", guessesUsed.toString(), Modifier.weight(1f))
+                    GlassStatTile(strings.score,   currentScore.toString(),  Modifier.weight(1f))
+                    GlassStatTile(strings.guesses, guessesUsed.toString(),   Modifier.weight(1f))
                 }
 
                 ResultGrid(boardStatus = boardStatus, rows = guessesUsed)
 
                 Button(
                     onClick = onPlayAgain,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF496B5A),
                         contentColor = Color.White
                     )
                 ) {
-                    Text("Play Again", fontWeight = FontWeight.Black)
+                    Text(strings.playAgain, fontWeight = FontWeight.Black)
                 }
                 TextButton(onClick = onStats) {
-                    Text("View Stats")
+                    Text(strings.viewStatsBtn)
                 }
             }
         }

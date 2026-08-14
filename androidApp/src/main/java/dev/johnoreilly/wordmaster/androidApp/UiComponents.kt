@@ -264,26 +264,31 @@ private val KEYBOARD_ROWS = listOf("QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
 @Composable
 fun Keyboard(
     keyStatus: Map<String, LetterStatus>,
+    enabled: Boolean = true,
     onLetter: (String) -> Unit,
     onEnter: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.graphicsLayer { alpha = if (enabled) 1f else 0.5f }
+    ) {
         KEYBOARD_ROWS.forEachIndexed { index, row ->
             Row(horizontalArrangement = Arrangement.Center) {
                 if (index == KEYBOARD_ROWS.size - 1) {
-                    KeyButton("ENTER", onClick = onEnter, flexWidth = true)
+                    KeyButton("ENTER", onClick = onEnter, flexWidth = true, enabled = enabled)
                 }
                 row.forEach { char ->
                     val letter = char.toString()
                     KeyButton(
                         label = letter,
                         onClick = { onLetter(letter) },
-                        status = keyStatus[letter] ?: LetterStatus.UNGUESSED
+                        status = keyStatus[letter] ?: LetterStatus.UNGUESSED,
+                        enabled = enabled
                     )
                 }
                 if (index == KEYBOARD_ROWS.size - 1) {
-                    KeyButton("DEL", onClick = onDelete, flexWidth = true)
+                    KeyButton("DEL", onClick = onDelete, flexWidth = true, enabled = enabled)
                 }
             }
         }
@@ -295,7 +300,8 @@ private fun KeyButton(
     label: String,
     onClick: () -> Unit,
     status: LetterStatus = LetterStatus.UNGUESSED,
-    flexWidth: Boolean = false
+    flexWidth: Boolean = false,
+    enabled: Boolean = true
 ) {
     val background = if (status == LetterStatus.UNGUESSED) {
         Color(0xFFD3D6DA)
@@ -311,7 +317,7 @@ private fun KeyButton(
             .then(if (flexWidth) Modifier.width(58.dp) else Modifier.width(31.dp))
             .clip(RoundedCornerShape(6.dp))
             .background(background)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(

@@ -28,11 +28,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.johnoreilly.wordmaster.shared.AppStrings
 import dev.johnoreilly.wordmaster.shared.WordMasterService
 
 @Composable
 fun HomeScreen(
     wordMasterService: WordMasterService,
+    strings: AppStrings,
     onPlay: () -> Unit,
     onStats: () -> Unit,
     onSettings: () -> Unit
@@ -69,7 +71,7 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Guess the hidden word",
+                    text = strings.guessHiddenWord,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF2F3A34)
@@ -79,9 +81,9 @@ fun HomeScreen(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    GlassStatTile("Played", stats.gamesPlayed.toString(), Modifier.weight(1f))
-                    GlassStatTile("Win %", "${stats.winRate}%", Modifier.weight(1f))
-                    GlassStatTile("Streak", stats.currentStreak.toString(), Modifier.weight(1f))
+                    GlassStatTile(strings.played, stats.gamesPlayed.toString(), Modifier.weight(1f))
+                    GlassStatTile(strings.winRate, "${stats.winRate}%", Modifier.weight(1f))
+                    GlassStatTile(strings.streak, stats.currentStreak.toString(), Modifier.weight(1f))
                 }
 
                 Button(
@@ -96,7 +98,7 @@ fun HomeScreen(
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 6.dp)
                 ) {
-                    Text("Play Now", fontSize = 17.sp, fontWeight = FontWeight.Black)
+                    Text(strings.playNow, fontSize = 17.sp, fontWeight = FontWeight.Black)
                 }
 
                 Row(
@@ -105,21 +107,17 @@ fun HomeScreen(
                 ) {
                     OutlinedButton(
                         onClick = onStats,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp),
+                        modifier = Modifier.weight(1f).height(50.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Stats")
+                        Text(strings.stats)
                     }
                     OutlinedButton(
                         onClick = onSettings,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp),
+                        modifier = Modifier.weight(1f).height(50.dp),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Settings")
+                        Text(strings.settings)
                     }
                 }
             }

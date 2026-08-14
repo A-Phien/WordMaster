@@ -1,5 +1,6 @@
 package dev.johnoreilly.wordmaster.androidApp
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,12 +23,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.johnoreilly.wordmaster.shared.AppStrings
 import dev.johnoreilly.wordmaster.shared.GameStats
 import dev.johnoreilly.wordmaster.shared.WordMasterService
-import androidx.compose.foundation.background
 
 @Composable
-fun StatsScreen(wordMasterService: WordMasterService) {
+fun StatsScreen(wordMasterService: WordMasterService, strings: AppStrings) {
     val stats by wordMasterService.gameStats.collectAsStateWithLifecycle()
 
     Column(
@@ -38,21 +39,21 @@ fun StatsScreen(wordMasterService: WordMasterService) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatTile("Played", stats.gamesPlayed.toString(), Modifier.weight(1f))
-            StatTile("Wins", stats.wins.toString(), Modifier.weight(1f))
+            StatTile(strings.played,  stats.gamesPlayed.toString(), Modifier.weight(1f))
+            StatTile(strings.wins,    stats.wins.toString(),        Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatTile("Win rate", "${stats.winRate}%", Modifier.weight(1f))
-            StatTile("Losses", stats.losses.toString(), Modifier.weight(1f))
+            StatTile(strings.winRate, "${stats.winRate}%",          Modifier.weight(1f))
+            StatTile(strings.losses,  stats.losses.toString(),      Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            StatTile("Current streak", stats.currentStreak.toString(), Modifier.weight(1f))
-            StatTile("Max streak", stats.maxStreak.toString(), Modifier.weight(1f))
+            StatTile(strings.currentStreak, stats.currentStreak.toString(), Modifier.weight(1f))
+            StatTile(strings.maxStreak,     stats.maxStreak.toString(),     Modifier.weight(1f))
         }
-        StatTile("Total score", stats.totalScore.toString(), Modifier.fillMaxWidth())
+        StatTile(strings.totalScore, stats.totalScore.toString(), Modifier.fillMaxWidth())
 
         Text(
-            text = "Guess distribution",
+            text = strings.guessDist,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
@@ -91,7 +92,8 @@ private fun GuessDistribution(stats: GameStats) {
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .padding(start = 10.dp),
-                        color = if (count > 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (count > 0) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Bold
                     )
                 }
