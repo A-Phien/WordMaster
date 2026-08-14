@@ -8,6 +8,7 @@
     <application
         android:name=".WordMasterApplication"
         android:allowBackup="false"
+        android:icon="@drawable/icon_app"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">

@@ -1,6 +1,14 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     alias(libs.plugins.compose.compiler)
+}
+
+// Read secrets from local.properties (never committed to VCS)
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) load(f.inputStream())
 }
 
 android {
@@ -14,10 +22,17 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Exposed to app code via BuildConfig.GEMINI_API_KEY
+        buildConfigField(
+            "String", "GEMINI_API_KEY",
+            "\"${localProps["gemini.api.key"] ?: ""}\""
+        )
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true   // required for buildConfigField
     }
 
     buildTypes {
@@ -33,6 +48,7 @@ android {
 }
 
 
+
 dependencies {
     implementation(project(":shared"))
 
@@ -45,4 +61,5 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.datastore.preferences)
 }
