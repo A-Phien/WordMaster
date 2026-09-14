@@ -16,7 +16,8 @@ import io.ktor.http.contentType
  */
 class GeminiService(private val apiKey: String) {
 
-    private val model = "gemini-2.0-flash"
+//    private val model = "gemini-2.0-flash-lite"
+      private val model = "gemini-flash-lite-latest"
     private val endpoint
         get() = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
 
@@ -37,7 +38,7 @@ class GeminiService(private val apiKey: String) {
     /**
      * Calls Gemini and returns a smart semantic hint about [answer] without revealing it.
      * The hint language follows [language]: EN = English, VI = Vietnamese.
-     * Always returns a non-null, non-empty string (falls back gracefully on any error).
+     * Throws on any failure so callers can handle errors uniformly.
      */
     suspend fun generateSmartHint(
         answer: String,
@@ -45,17 +46,17 @@ class GeminiService(private val apiKey: String) {
         keyStatus: Map<String, LetterStatus>,
         language: AppLanguage = AppLanguage.EN
     ): String {
-        return try {
-            val prompt      = buildPrompt(answer, boardGuesses, keyStatus, language)
-            val responseJson = callApi(prompt)
-            // Log raw response for debugging (visible in Logcat)
-            println("[GeminiService] raw response: ${responseJson.take(300)}")
-            val hint = extractText(responseJson, language)
-            sanitize(hint, answer, language)
-        } catch (e: Exception) {
-            println("[GeminiService] exception: ${e.message}")
-            if (language == AppLanguage.VI) FALLBACK_VI else FALLBACK
+        val prompt       = buildPrompt(answer, boardGuesses, keyStatus, language)
+        val responseJson = callApi(prompt)
+        println("[GeminiService] raw response (500c): ${responseJson.take(500)}")
+        val hint = extractText(responseJson)
+            ?: throw Exception("No 'text' field found in Gemini response")
+        val safe = sanitize(hint, answer)
+        if (safe == null) {
+            println("[GeminiService] sanitize blocked hint (answer leaked). hint='${hint.take(80)}'")
+            throw Exception("Sanitize blocked: answer appeared in hint")
         }
+        return safe
     }
 
     // ── Prompt construction ───────────────────────────────────────────────────
@@ -85,43 +86,54 @@ class GeminiService(private val apiKey: String) {
         return if (language == AppLanguage.VI) {
             """
 Bạn là trợ lý AI cho trò chơi đoán từ WordMaster.
-TỪ BÍ MẬT CẦN ĐOÁN LÀ: "$answer" (đây là một từ tiếng Anh 5 chữ cái).
+TỪ BÍ MẬT CẦN ĐOÁN LÀ: "$answer" (một từ tiếng Anh 5 chữ cái).
 
-Trạng thái bàn chơi hiện tại:
-- Các từ người chơi đã đoán: $guessedWords
-- Các chữ cái đúng vị trí: $confirmed
-- Các chữ cái KHÔNG có trong từ: $eliminated
+Trạng thái bàn chơi:
+- Từ đã đoán: $guessedWords
+- Chữ cái đúng vị trí: $confirmed
+- Chữ cái KHÔNG có trong từ: $eliminated
 
-NHỆM VỤ CỦA BẠN:
-Viết duy nhất 01 câu gợi ý thông minh về NGHĨA, CHỦ ĐỀ hoặc BỐI CẢNH SỬ DỤNG của từ bí mật này BẰNG TIẾNG VIỆT để giúp người chơi hình dung ra từ.
+NHIỆM VỤ:
+Viết một gợi ý CHI TIẾT NHẤT CÓ THỂ bằng Tiếng Việt, gần như "bật mí" đáp án để người chơi dễ đoán ra ngay.
 
-QUY TẮC BẮT BUỘC:
-1. Viết câu gợi ý HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, dễ hiểu (Ví dụ: "Đây là một khái niệm liên quan đến...", "Từ này chỉ một đồ vật...").
-2. Tối đa 2 câu ngắn (không quá 30 từ).
-3. TUYỆT ĐỐI KHÔNG xuất hiện từ tiếng Anh "$answer" trong câu trả lời.
-4. TUYỆT ĐỐI KHÔNG tiết lộ chữ cái hay cách đánh vần.
-5. Chỉ trả về duy nhất đoạn văn gợi ý — không thêm lời mở đầu, lời chào hay nhãn phụ.
+YÊU CẦU CỤ THỂ — đề cập càng nhiều điểm dưới đây càng tốt:
+- Nghĩa chính xác của từ (định nghĩa từ điển)
+- Từ đồng nghĩa gần nhất trong tiếng Anh (ghi rõ "từ đồng nghĩa: ...")
+- Ví dụ câu sử dụng từ này trong tiếng Anh
+- Lĩnh vực / chủ đề (ví dụ: thể thao, nấu ăn, cảm xúc, thiên nhiên...)
+- Từ trái nghĩa nếu có
+- Bất kỳ liên tưởng nào giúp nhận ra từ
+
+GIỚI HẠN:
+- Tối đa 3 câu, viết hoàn toàn bằng Tiếng Việt tự nhiên.
+- TUYỆT ĐỐI KHÔNG viết ra chính từ "$answer" hay cách đánh vần của nó.
+- Chỉ trả về nội dung gợi ý, không thêm tiêu đề hay lời mở đầu.
             """.trimIndent()
         } else {
             """
 You are an AI assistant for WordMaster, a Wordle-style word puzzle game.
 The SECRET WORD is: "$answer"
 
-Current board state:
-- Words the player guessed so far: $guessedWords
-- Letters confirmed at correct positions: $confirmed
-- Letters confirmed NOT in the word: $eliminated
+Board state:
+- Guessed words: $guessedWords
+- Correct-position letters: $confirmed
+- Eliminated letters: $eliminated
 
 YOUR TASK:
-Write exactly ONE smart semantic hint about the secret word.
+Write a VERY DETAILED hint that nearly gives away the answer — this is a last-resort hint for a stuck player.
 
-STRICT RULES (violating any rule is unacceptable):
-1. Describe WHAT the word means or refers to: its category, field, or usage context.
-2. Maximum 2 short sentences, 35 words total.
-3. NEVER include the secret word "$answer" itself.
-4. NEVER directly reveal any individual letter or spelling pattern of the answer.
-5. Write in English only.
-6. Output ONLY the hint text — no labels, no preamble, no extra commentary.
+INCLUDE AS MANY OF THESE AS POSSIBLE:
+- Precise dictionary definition of the word
+- Its closest English synonyms (e.g. "Synonyms: ...")
+- An example sentence using the word
+- Its domain / topic (e.g. cooking, emotion, nature, sports...)
+- Its antonym(s) if applicable
+- Any strong association or cultural reference that would trigger recognition
+
+CONSTRAINTS:
+- Maximum 3 sentences, written in plain English.
+- NEVER write the secret word "$answer" itself or spell it out.
+- Output ONLY the hint text — no labels, no preamble.
             """.trimIndent()
         }
     }
@@ -129,11 +141,11 @@ STRICT RULES (violating any rule is unacceptable):
     // ── HTTP call via Ktor ────────────────────────────────────────────────────
 
     private suspend fun callApi(prompt: String): String {
-        val body = """
+        val requestBody = """
         {
           "contents": [{"parts": [{"text": ${escapeJson(prompt)}}]}],
           "generationConfig": {
-            "maxOutputTokens": 150,
+            "maxOutputTokens": 200,
             "temperature": 0.75
           }
         }
@@ -141,38 +153,47 @@ STRICT RULES (violating any rule is unacceptable):
 
         val response = client.post(endpoint) {
             contentType(ContentType.Application.Json)
-            setBody(body)
+            setBody(requestBody)
         }
-        return response.bodyAsText()
+        val responseText = response.bodyAsText()
+        // Throw on any non-2xx so the caller's catch block handles it correctly.
+        // Without this check, Ktor silently returns error JSON (400/403/429)
+        // and extractText falls through to FALLBACK without raising an exception.
+        if (response.status.value !in 200..299) {
+            throw Exception("Gemini HTTP ${response.status.value}: $responseText")
+        }
+        return responseText
     }
 
     // ── Response parsing ──────────────────────────────────────────────────────
 
     /**
      * Extracts the first "text" field from the Gemini JSON response.
-     * Uses simple regex parsing to avoid requiring kotlinx.serialization setup.
-     * Returns the correct-language fallback if no text field is found
-     * (e.g. when the API returns an error response).
+     * Returns null if no text field is found (caller decides how to handle).
      */
-    private fun extractText(json: String, language: AppLanguage = AppLanguage.EN): String {
+    private fun extractText(json: String): String? {
         val pattern = Regex(""""text"\s*:\s*"((?:[^"\\]|\\.)*)"""")
         return pattern.findAll(json).firstOrNull()
             ?.groupValues?.get(1)
             ?.replace("\\n", " ")
             ?.replace("\\\"", "\"")
             ?.trim()
-            ?: if (language == AppLanguage.VI) FALLBACK_VI else FALLBACK
+            ?.takeIf { it.isNotBlank() }
     }
 
     // ── Safety filter ─────────────────────────────────────────────────────────
 
     /**
-     * Last-resort check: if the AI accidentally included the answer, swap in the correct-language fallback.
+     * Safety check: returns null if the hint reveals the answer as a standalone word.
+     * Uses word-boundary matching to avoid false positives (e.g. answer "ARTHA"
+     * legitimately appearing as a Sanskrit term in its own definition).
+     * Returns null → caller throws → no penalty applied.
      */
-    private fun sanitize(hint: String, answer: String, language: AppLanguage = AppLanguage.EN): String {
-        val fallback = if (language == AppLanguage.VI) FALLBACK_VI else FALLBACK
-        return if (hint.isBlank() || hint.lowercase().contains(answer.lowercase())) fallback
-               else hint
+    private fun sanitize(hint: String, answer: String): String? {
+        if (hint.isBlank()) return null
+        // Only block if the exact answer appears surrounded by word boundaries
+        val pattern = Regex("""(?i)\b${Regex.escape(answer)}\b""")
+        return if (pattern.containsMatchIn(hint)) null else hint
     }
 
     // ── JSON escape ───────────────────────────────────────────────────────────

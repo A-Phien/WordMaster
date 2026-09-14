@@ -52,9 +52,8 @@ class GameStateStore(context: Context) {
     private fun encodeBoard(board: ArrayList<ArrayList<String>>): String =
         board.joinToString("|") { row -> row.joinToString(",") }
 
-    private fun decodeBoard(s: String): ArrayList<ArrayList<String>> {
+    private fun decodeBoard(s: String, colCount: Int): ArrayList<ArrayList<String>> {
         val rowCount = WordMasterService.MAX_NUMBER_OF_GUESSES
-        val colCount = WordMasterService.NUMBER_LETTERS
         val rowParts = s.split("|")
         return ArrayList((0 until rowCount).map { i ->
             val cells = rowParts.getOrNull(i)?.split(",") ?: emptyList()
@@ -67,10 +66,9 @@ class GameStateStore(context: Context) {
             row.joinToString(",") { it.ordinal.toString() }
         }
 
-    private fun decodeStatus(s: String): ArrayList<ArrayList<LetterStatus>> {
+    private fun decodeStatus(s: String, colCount: Int): ArrayList<ArrayList<LetterStatus>> {
         val allStatuses = LetterStatus.entries          // List<LetterStatus> (Kotlin 1.9+)
         val rowCount = WordMasterService.MAX_NUMBER_OF_GUESSES
-        val colCount = WordMasterService.NUMBER_LETTERS
         val rowParts = s.split("|")
         return ArrayList((0 until rowCount).map { i ->
             val cells = rowParts.getOrNull(i)?.split(",") ?: emptyList()
@@ -138,11 +136,12 @@ class GameStateStore(context: Context) {
         val boardGuesses  = prefs[Keys.BOARD_GUESSES] ?: return false
         val boardStatus   = prefs[Keys.BOARD_STATUS]  ?: return false
 
+        val colCount = service.wordLength.value
         service.restoreGameState(
             savedAnswer          = answer,
             savedAttempt         = attempt,
-            savedBoardGuesses    = decodeBoard(boardGuesses),
-            savedBoardStatus     = decodeStatus(boardStatus),
+            savedBoardGuesses    = decodeBoard(boardGuesses, colCount),
+            savedBoardStatus     = decodeStatus(boardStatus, colCount),
             savedKeyStatus       = decodeKeyStatus(prefs[Keys.KEY_STATUS] ?: ""),
             savedVowelHintUsed   = prefs[Keys.VOWEL_HINT]    ?: false,
             savedLetterHintUsed  = prefs[Keys.LETTER_HINT]   ?: false,

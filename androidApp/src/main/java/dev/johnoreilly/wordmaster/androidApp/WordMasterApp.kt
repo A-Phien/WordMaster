@@ -1,11 +1,14 @@
 package dev.johnoreilly.wordmaster.androidApp
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -20,8 +23,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.johnoreilly.wordmaster.shared.AppLanguage
 import dev.johnoreilly.wordmaster.shared.AppStrings
@@ -41,8 +48,49 @@ fun WordMasterApp() {
 
     // ── Service & Stores ─────────────────────────────────────────────────────
     val wordMasterService = remember {
-        val wordsPath = "${context.filesDir.absolutePath}/words.txt"
-        WordMasterService(wordsPath, geminiApiKey = BuildConfig.GEMINI_API_KEY)
+        val wordsDir = context.filesDir.absolutePath
+
+        // ── Step 1: Copy files needed immediately (sync) ──────────────────────
+        // words.txt (5-letter valid guesses) is needed before WordMasterService starts.
+        // targets_5.txt ALWAYS overwritten to ensure the latest clean version is used.
+        val wordsFile = java.io.File(wordsDir, "words.txt")
+        if (!wordsFile.exists()) {
+            try {
+                context.assets.open("words.txt").use { i ->
+                    wordsFile.outputStream().use { o -> i.copyTo(o) }
+                }
+            } catch (_: Exception) {}
+        }
+        // Always overwrite targets_5.txt (ensures BOM-free version from latest assets)
+        try {
+            context.assets.open("targets_5.txt").use { i ->
+                java.io.File(wordsDir, "targets_5.txt").outputStream().use { o -> i.copyTo(o) }
+            }
+        } catch (_: Exception) {}
+
+        // ── Step 2: Copy remaining word lists in background ────────────────────
+        Thread {
+            listOf("words_3.txt", "words_4.txt", "words_6.txt").forEach { name ->
+                val dest = java.io.File(wordsDir, name)
+                if (!dest.exists()) {
+                    try {
+                        context.assets.open(name).use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
+                    } catch (_: Exception) {}
+                }
+            }
+            // Always overwrite other targets files too
+            listOf("targets_3.txt", "targets_4.txt", "targets_6.txt").forEach { name ->
+                try {
+                    context.assets.open(name).use { i ->
+                        java.io.File(wordsDir, name).outputStream().use { o -> i.copyTo(o) }
+                    }
+                } catch (_: Exception) {}
+            }
+        }.start()
+
+        WordMasterService(wordsDir, geminiApiKey = BuildConfig.GEMINI_API_KEY)
+
+
     }
     val statsStore     = remember { StatsStore(context) }
     val gameStateStore = remember { GameStateStore(context) }
@@ -111,10 +159,11 @@ fun WordMasterApp() {
         if (gameStatus != GameStatus.PLAYING) gameStateStore.clearGame()
     }
     // ──────────────────────────────────────────────────────────────────────────
+    val isLoadingWords by wordMasterService.isLoadingWords.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
-            if (currentScreen != AppScreen.Home) {
+            if (currentScreen != AppScreen.Home && !isLoadingWords) {
                 WordMasterTopAppBar(
                     title = when (currentScreen) {
                         AppScreen.Home     -> "WordMaster"
@@ -136,6 +185,33 @@ fun WordMasterApp() {
                 .imePadding()
                 .background(MaterialTheme.colorScheme.background)
         ) {
+            // ── Loading splash while word list is loading from disk ────────────
+            if (isLoadingWords) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1A2B22)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            color = Color(0xFF6FCF97),
+                            strokeWidth = 3.dp
+                        )
+                        Text(
+                            "WordMaster",
+                            color = Color.White,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+                return@Scaffold
+            }
+
             when (currentScreen) {
                 AppScreen.Home -> HomeScreen(
                     wordMasterService = wordMasterService,

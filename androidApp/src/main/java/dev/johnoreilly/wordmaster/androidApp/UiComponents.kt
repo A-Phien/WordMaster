@@ -176,7 +176,8 @@ fun LetterTile(
     letter: String,
     status: LetterStatus,
     shouldFlip: Boolean = false,
-    flipDelayMs: Int = 0
+    flipDelayMs: Int = 0,
+    tileSize: androidx.compose.ui.unit.Dp = 52.dp
 ) {
     // Rotation state for the flip effect
     val rotationX = remember { Animatable(0f) }
@@ -229,10 +230,9 @@ fun LetterTile(
     Box(
         Modifier
             .padding(3.dp)
-            .size(52.dp)
+            .size(tileSize)
             .graphicsLayer {
                 this.rotationX = rotationX.value
-                // Increase camera distance to soften the perspective distortion
                 cameraDistance = 12f * density
             }
             .clip(RoundedCornerShape(8.dp))
@@ -252,7 +252,7 @@ fun LetterTile(
         Text(
             text = letter,
             color = mapLetterStatusToTextColor(displayStatus),
-            fontSize = 24.sp,
+            fontSize = (tileSize.value * 0.44f).sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center
         )
@@ -331,10 +331,10 @@ private fun KeyButton(
 
 fun mapLetterStatusToBackgroundColor(letterStatus: LetterStatus): Color {
     return when (letterStatus) {
-        LetterStatus.UNGUESSED -> Color.White
-        LetterStatus.CORRECT_POSITION -> Color(0xFF2E7D32)
-        LetterStatus.INCORRECT_POSITION -> Color(0xFF9B870C)
-        LetterStatus.NOT_IN_WORD -> Color(0xFF787C7E)
+        LetterStatus.UNGUESSED          -> Color.White
+        LetterStatus.CORRECT_POSITION   -> Color(0xFF2E7D32)   // 🟢 Xanh — đúng vị trí
+        LetterStatus.INCORRECT_POSITION -> Color(0xFFCC8800)   // 🟡 Vàng — sai vị trí
+        LetterStatus.NOT_IN_WORD        -> Color(0xFFC62828)   // 🔴 Đỏ — không có trong từ
     }
 }
 

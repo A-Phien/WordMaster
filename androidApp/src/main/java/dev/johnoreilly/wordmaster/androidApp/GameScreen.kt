@@ -1,16 +1,20 @@
 package dev.johnoreilly.wordmaster.androidApp
 
-import android.content.pm.ApplicationInfo
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -21,13 +25,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -37,7 +43,10 @@ import dev.johnoreilly.wordmaster.shared.AppStrings
 import dev.johnoreilly.wordmaster.shared.GameStatus
 import dev.johnoreilly.wordmaster.shared.LetterStatus
 import dev.johnoreilly.wordmaster.shared.WordMasterService
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val GUESS_TIMER_SECONDS = 60
 
 @Composable
 fun GameScreen(
@@ -55,8 +64,6 @@ fun GameScreen(
     val gameStatus by wordMasterService.gameStatus.collectAsStateWithLifecycle()
     val currentScore by wordMasterService.currentScore.collectAsStateWithLifecycle()
     val stats by wordMasterService.gameStats.collectAsStateWithLifecycle()
-    val isDebugBuild = LocalContext.current.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-    var showDevTools by remember { mutableStateOf(false) }
 
     // ── Hint state ────────────────────────────────────────────────────────────
     val vowelHintUsed by wordMasterService.vowelHintUsed.collectAsStateWithLifecycle()
@@ -70,39 +77,59 @@ fun GameScreen(
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Flip-animation state ─────────────────────────────────────────────────
-    // Counts how many rows have been fully scored (all tiles != UNGUESSED).
-    // Wrapped in derivedStateOf so it recomputes reactively whenever boardStatus changes.
     val scoredRowsCount = boardStatus.count { row ->
         row.all { it != LetterStatus.UNGUESSED }
     }
-    // Index of the row whose tiles are currently flipping (-1 = none).
     var animatingRowIndex by remember { mutableStateOf<Int?>(null) }
-    // Gate for ResultSheet: true only after the last row's animation finishes.
     var showResult by remember { mutableStateOf(false) }
 
-    // When scoredRowsCount changes (new guess submitted), kick off the flip
-    // animation for that row, then show the ResultSheet if the game ended.
     LaunchedEffect(scoredRowsCount) {
         if (scoredRowsCount == 0) {
-            // Game was reset — clear everything
             animatingRowIndex = null
             showResult = false
             return@LaunchedEffect
         }
-        val rowToFlip = scoredRowsCount - 1   // 0-indexed row that was just scored
+        val rowToFlip = scoredRowsCount - 1
         animatingRowIndex = rowToFlip
-
-        // Total wait = delay of last tile + one full flip duration
-        // last tile delay = (N-1) * 120 ms, flip = 2 * 150 ms = 300 ms
-        val waitMs = (WordMasterService.NUMBER_LETTERS - 1) * 120L + 300L
+        val waitMs = (wordMasterService.wordLength.value - 1) * 120L + 300L
         kotlinx.coroutines.delay(waitMs)
-
         animatingRowIndex = null
         if (gameStatus != GameStatus.PLAYING) {
             showResult = true
         }
     }
+
+    // For timeout / revealAndLose: gameStatus flips to LOST without changing
+    // scoredRowsCount, so the flip-animation LaunchedEffect never fires.
+    // This one catches those cases and shows the ResultSheet after a short pause.
+    LaunchedEffect(gameStatus) {
+        if (gameStatus == GameStatus.PLAYING) {
+            showResult = false   // clear on new game
+            return@LaunchedEffect
+        }
+        delay(400L)   // brief pause so it feels intentional, not jarring
+        showResult = true
+    }
     // ────────────────────────────────────────────────────────────────────────
+
+    // ── Per-guess countdown timer ─────────────────────────────────────────────
+    var timeLeft by remember { mutableIntStateOf(GUESS_TIMER_SECONDS) }
+
+    // Restart countdown whenever a guess row is completed OR game status changes
+    LaunchedEffect(scoredRowsCount, gameStatus) {
+        if (gameStatus != GameStatus.PLAYING) {
+            timeLeft = GUESS_TIMER_SECONDS   // reset display when game ends
+            return@LaunchedEffect
+        }
+        timeLeft = GUESS_TIMER_SECONDS
+        while (timeLeft > 0) {
+            delay(1000L)
+            timeLeft--
+        }
+        // Time's up — burn this attempt
+        wordMasterService.timeoutGuess()
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     val shakeOffset = remember { Animatable(0f) }
     LaunchedEffect(guessError) {
@@ -141,10 +168,57 @@ fun GameScreen(
                 )
             }
 
+            // ── Countdown timer bar ───────────────────────────────────────────
+            if (gameStatus == GameStatus.PLAYING) {
+                val timerColor = when {
+                    timeLeft > 30 -> Color(0xFF2E7D32)   // 🟢 xanh — nhiều giờ
+                    timeLeft > 10 -> Color(0xFFCC8800)   // 🟡 vàng — sắp hết
+                    else          -> Color(0xFFC62828)   // 🔴 đỏ — nguy hiểm
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Progress track
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0x22000000))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(timeLeft.toFloat() / GUESS_TIMER_SECONDS)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(timerColor)
+                        )
+                    }
+                    // Seconds label
+                    Text(
+                        text = "${timeLeft}s",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = timerColor,
+                        modifier = Modifier.width(32.dp)
+                    )
+                }
+            }
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
+                // Scale tile size so all letters fit on one row regardless of word length
+                // 3-4 letters: 52dp, 5 letters: 50dp, 6 letters: 46dp
+                val wordLen = wordMasterService.wordLength.value
+                val tileSize = when {
+                    wordLen >= 6 -> 46.dp
+                    wordLen == 5 -> 50.dp
+                    else         -> 52.dp
+                }
                 Column(
                     Modifier.padding(14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -156,13 +230,14 @@ fun GameScreen(
                             Modifier
                         }
                         Row(rowModifier, horizontalArrangement = Arrangement.Center) {
-                            for (character in 0 until WordMasterService.NUMBER_LETTERS) {
+                            for (character in 0 until wordMasterService.wordLength.value) {
                                 val isFlippingThisRow = animatingRowIndex == guessAttempt
                                 LetterTile(
                                     letter = boardGuesses[guessAttempt][character],
                                     status = boardStatus[guessAttempt][character],
                                     shouldFlip = isFlippingThisRow,
-                                    flipDelayMs = if (isFlippingThisRow) character * 120 else 0
+                                    flipDelayMs = if (isFlippingThisRow) character * 120 else 0,
+                                    tileSize = tileSize
                                 )
                             }
                         }
@@ -211,19 +286,10 @@ fun GameScreen(
                 }
             }
 
-            if (isDebugBuild) {
-                OutlinedButton(onClick = { showDevTools = !showDevTools }) {
-                    Text(if (showDevTools) strings.hideDevTools else strings.devTools)
-                }
-                if (showDevTools) {
-                    DevToolsPanel(
-                        answer = wordMasterService.answer,
-                        onShowAnswer = { wordMasterService.revealAnswerForDebug() },
-                        onFillAnswer = { wordMasterService.fillAnswerForDebug() },
-                        onAutoWin = { wordMasterService.winNowForDebug() },
-                        onAutoLose = { wordMasterService.loseNowForDebug() },
-                        onResetStats = onResetStats
-                    )
+            // "Xem đáp án" — reveals answer and immediately loses the game
+            if (gameStatus == GameStatus.PLAYING) {
+                OutlinedButton(onClick = { wordMasterService.revealAndLose() }) {
+                    Text(strings.showAnswer)
                 }
             }
         }
@@ -237,7 +303,9 @@ fun GameScreen(
             guessesUsed = wordMasterService.currentGuessAttempt,
             answer = revealedAnswer ?: wordMasterService.answer,
             boardStatus = boardStatus,
+            wordLength = wordMasterService.wordLength.value,
             strings = strings,
+            pixabayApiKey = BuildConfig.PIXABAY_API_KEY,
             onPlayAgain = { wordMasterService.resetGame() },
             onStats = onStats
         )

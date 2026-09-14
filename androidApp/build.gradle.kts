@@ -28,6 +28,11 @@ android {
             "String", "GEMINI_API_KEY",
             "\"${localProps["gemini.api.key"] ?: ""}\""
         )
+        // Exposed to app code via BuildConfig.PIXABAY_API_KEY
+        buildConfigField(
+            "String", "PIXABAY_API_KEY",
+            "\"${localProps["PIXABAY_API_KEY"] ?: ""}\""
+        )
     }
 
     buildFeatures {
@@ -62,4 +67,5 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.coil.compose)
 }

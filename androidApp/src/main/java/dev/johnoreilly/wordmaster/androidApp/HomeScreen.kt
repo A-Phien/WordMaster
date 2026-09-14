@@ -39,7 +39,8 @@ fun HomeScreen(
     onStats: () -> Unit,
     onSettings: () -> Unit
 ) {
-    val stats by wordMasterService.gameStats.collectAsStateWithLifecycle()
+    val stats      by wordMasterService.gameStats.collectAsStateWithLifecycle()
+    val wordLength by wordMasterService.wordLength.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize()) {
         WordMasterBackground(scrimAlpha = 0.08f)
@@ -86,6 +87,15 @@ fun HomeScreen(
                     GlassStatTile(strings.streak, stats.currentStreak.toString(), Modifier.weight(1f))
                 }
 
+                // ── Word length selector ──────────────────────────────────────
+                WordLengthSelector(
+                    label    = strings.wordLengthLabel,
+                    lengths  = WordMasterService.SUPPORTED_LENGTHS,
+                    selected = wordLength,
+                    labelFor = { strings.letters(it) },
+                    onSelect = { wordMasterService.setWordLength(it) }
+                )
+
                 Button(
                     onClick = onPlay,
                     modifier = Modifier
@@ -118,6 +128,60 @@ fun HomeScreen(
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Text(strings.settings)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Word length chip selector ─────────────────────────────────────────────────
+
+@Composable
+private fun WordLengthSelector(
+    label: String,
+    lengths: List<Int>,
+    selected: Int,
+    labelFor: (Int) -> String,
+    onSelect: (Int) -> Unit
+) {
+    androidx.compose.foundation.layout.Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF496B5A)
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            lengths.forEach { n ->
+                if (n == selected) {
+                    Button(
+                        onClick = { onSelect(n) },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF496B5A),
+                            contentColor   = Color.White
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                    ) {
+                        Text(labelFor(n), fontWeight = FontWeight.Black, fontSize = 13.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { onSelect(n) },
+                        modifier = Modifier.weight(1f).height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF496B5A))
+                    ) {
+                        Text(labelFor(n), color = Color(0xFF496B5A), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             }

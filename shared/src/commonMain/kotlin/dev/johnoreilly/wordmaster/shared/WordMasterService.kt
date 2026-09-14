@@ -2,13 +2,16 @@ package dev.johnoreilly.wordmaster.shared
 
 import com.rickclephas.kmp.nativecoroutines.NativeCoroutineScope
 import com.rickclephas.kmp.nativecoroutines.NativeCoroutines
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okio.FileSystem
 import okio.Path
 import okio.Path.Companion.toPath
 import dev.johnoreilly.wordmaster.shared.LetterStatus.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.MainScope
 import okio.SYSTEM
 
 
@@ -35,7 +38,7 @@ data class GameStats(
 
 
 class WordMasterService(
-    wordsFilePath: String,
+    private val wordsDir: String,
     geminiApiKey: String = ""
 ) {
     @NativeCoroutineScope
@@ -48,8 +51,17 @@ class WordMasterService(
     /** Validates guesses online when the word is not in the local dictionary. */
     private val onlineValidator = OnlineWordValidator()
 
-    private val validWords = mutableListOf<String>()
-    private val validWordsSet = mutableSetOf<String>()
+    /** All word lists, keyed by word length. Populated once at startup on IO thread. */
+    private val allWordLists = mutableMapOf<Int, List<String>>()
+    /** All word sets for fast validation, keyed by word length. */
+    private val allWordSets  = mutableMapOf<Int, Set<String>>()
+
+    /** Curated concrete noun lists with clear visual representations, keyed by length. */
+    private val allTargetLists = mutableMapOf<Int, List<String>>()
+
+    /** Active word list (backed by the preloaded list for the current length). */
+    private var validWords: MutableList<String> = mutableListOf()
+    private var validWordsSet: MutableSet<String> = mutableSetOf()
 
     var answer = ""
     var currentGuessAttempt = 0
@@ -81,6 +93,28 @@ class WordMasterService(
 
     /** Change the display language. UI rebuilds automatically via StateFlow. */
     fun setLanguage(lang: AppLanguage) { appLanguage.value = lang }
+
+    /** Current word length (3, 4, 5, or 6). Drives board size and active word list. */
+    @NativeCoroutines
+    val wordLength: MutableStateFlow<Int> = MutableStateFlow(DEFAULT_WORD_LENGTH)
+
+    /** True only during initial startup while all word lists are being loaded. */
+    @NativeCoroutines
+    val isLoadingWords: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+    /**
+     * Switch word length instantly — NO file I/O.
+     * All word lists are already preloaded in [allWordLists].
+     */
+    fun setWordLength(length: Int) {
+        if (length == wordLength.value) return
+        val list = allWordLists[length]
+        if (list == null || list.isEmpty()) return   // not loaded yet (shouldn't happen)
+        wordLength.value = length
+        validWords    = list.toMutableList()
+        validWordsSet = (allWordSets[length] ?: emptySet()).toMutableSet()
+        resetGame()
+    }
 
     // Best-known status for each letter typed so far, used to colour the on-screen keyboard.
     @NativeCoroutines
@@ -119,14 +153,69 @@ class WordMasterService(
 
 
     init {
-        println("wordsFilePath = $wordsFilePath")
-        readWords(wordsFilePath.toPath())
-        resetGame()
+        // Preload ALL word lists on IO thread — once at startup.
+        // After this, switching word length is instant (no more disk I/O).
+        isLoadingWords.value = true
+        coroutineScope.launch(Dispatchers.IO) {
+            for (length in SUPPORTED_LENGTHS) {
+                val fileName = if (length == DEFAULT_WORD_LENGTH) "words.txt" else "words_$length.txt"
+                val path = "$wordsDir/$fileName".toPath()
+                val list = mutableListOf<String>()
+                val set  = mutableSetOf<String>()
+                try {
+                    FileSystem.SYSTEM.read(path) {
+                        while (true) {
+                            val word = readUtf8Line() ?: break
+                            if (word.isNotBlank()) {
+                                list.add(word.trim())
+                                set.add(word.trim().uppercase())
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // File not available yet — skip silently
+                }
+
+                // Read target words (curated concrete nouns with clear images)
+                val targetFileName = "targets_$length.txt"
+                val targetPath = "$wordsDir/$targetFileName".toPath()
+                val targetList = mutableListOf<String>()
+                try {
+                    FileSystem.SYSTEM.read(targetPath) {
+                        while (true) {
+                            val word = readUtf8Line() ?: break
+                            val trimmed = word.trim()
+                            if (trimmed.isNotBlank()) {
+                                targetList.add(trimmed)
+                                set.add(trimmed.uppercase())
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+
+                allWordLists[length] = list
+                allWordSets[length]  = set
+                allTargetLists[length] = targetList
+            }
+
+            withContext(Dispatchers.Main) {
+                // Point to the default (5-letter) list
+                validWords    = (allWordLists[DEFAULT_WORD_LENGTH] ?: emptyList()).toMutableList()
+                validWordsSet = (allWordSets[DEFAULT_WORD_LENGTH]  ?: emptySet()).toMutableSet()
+                isLoadingWords.value = false
+                resetGame()
+            }
+        }
     }
 
     fun resetGame() {
         currentGuessAttempt = 0
-        answer = validWords.random().uppercase()
+        val targets = allTargetLists[wordLength.value]
+        answer = if (!targets.isNullOrEmpty()) {
+            targets.random().uppercase()
+        } else {
+            validWords.random().uppercase()
+        }
         revealedAnswer.value = null
         lastGuessCorrect.value = false
         gameStatus.value = GameStatus.PLAYING
@@ -148,7 +237,7 @@ class WordMasterService(
         for (guessAttempt in 0 until MAX_NUMBER_OF_GUESSES) {
             val statusList = arrayListOf<LetterStatus>()
             val guesses = arrayListOf<String>()
-            for (character in 0 until NUMBER_LETTERS) {
+            for (character in 0 until wordLength.value) {
                 statusList.add(UNGUESSED)
                 guesses.add("")
             }
@@ -160,7 +249,7 @@ class WordMasterService(
     }
 
     private fun isGameFinished(): Boolean =
-        lastGuessCorrect.value || currentGuessAttempt >= MAX_NUMBER_OF_GUESSES
+        lastGuessCorrect.value || currentGuessAttempt >= MAX_NUMBER_OF_GUESSES || gameStatus.value != GameStatus.PLAYING
 
     fun isValidWord(word: String): Boolean = validWordsSet.contains(word.uppercase())
 
@@ -192,6 +281,28 @@ class WordMasterService(
         guessError.value = null
     }
 
+    /**
+     * Called when the per-guess countdown timer reaches zero.
+     * Immediately ends the game as a loss — no extra attempts consumed.
+     */
+    fun timeoutGuess() {
+        if (isGameFinished()) return
+        revealedAnswer.value = answer
+        gameStatus.value = GameStatus.LOST
+        recordLoss()
+    }
+
+    /**
+     * Called when the player deliberately taps "Reveal Answer".
+     * Immediately reveals the answer and records a loss.
+     */
+    fun revealAndLose() {
+        if (isGameFinished()) return
+        revealedAnswer.value = answer
+        gameStatus.value = GameStatus.LOST
+        recordLoss()
+    }
+
     fun revealAnswerForDebug() {
         revealedAnswer.value = answer
     }
@@ -212,7 +323,7 @@ class WordMasterService(
 
         val losingWord = validWords
             .map { it.uppercase() }
-            .firstOrNull { it.length == NUMBER_LETTERS && it != answer }
+            .firstOrNull { it.length == wordLength.value && it != answer }
             ?: return
 
         while (!isGameFinished()) {
@@ -305,7 +416,7 @@ class WordMasterService(
                     .filter { it >= 0 }
             }
             .toSet()
-        val candidates = (0 until NUMBER_LETTERS).filter { it !in alreadyCorrect }
+        val candidates = (0 until wordLength.value).filter { it !in alreadyCorrect }
         if (candidates.isEmpty()) {
             val allKnownMsg = if (appLanguage.value == AppLanguage.VI)
                 "Tất cả vị trí đã được biết."
@@ -343,6 +454,8 @@ class WordMasterService(
         }
 
         isAiThinking.value = true
+        // Mark used immediately so button disables while thinking
+        aiHintUsed.value = true
         try {
             val submittedGuesses = boardGuesses.value.take(currentGuessAttempt)
             val hint = service.generateSmartHint(
@@ -351,12 +464,18 @@ class WordMasterService(
                 keyStatus    = keyStatus.value,
                 language     = lang
             )
+            // ✅ API succeeded — charge penalty and show real hint
             hintMessages.value = hintMessages.value + "🤖 $hint  (−150 pts)"
-            aiHintUsed.value = true
             hintPenalty += 150
-        } catch (_: Exception) {
-            val fallback = if (lang == AppLanguage.VI) GeminiService.FALLBACK_VI else GeminiService.FALLBACK
-            hintMessages.value = hintMessages.value + "🤖 $fallback  (−0 pts)"
+        } catch (e: Exception) {
+            // ❌ API failed (wrong key, quota exceeded, offline) — NO penalty, allow retry
+            println("[AI Hint] error: ${e.message}")
+            aiHintUsed.value = false   // re-enable so player can try again later
+            val errMsg = if (lang == AppLanguage.VI)
+                "🤖 Không thể kết nối AI. Kiểm tra API key hoặc mạng. (−0 pts)"
+            else
+                "🤖 Could not reach AI. Check API key or network. (−0 pts)"
+            hintMessages.value = hintMessages.value + errMsg
         } finally {
             isAiThinking.value = false
         }
@@ -380,8 +499,8 @@ class WordMasterService(
         if (isGameFinished()) return
 
         val currentGuess = boardGuesses.value[currentGuessAttempt].joinToString("")
-        if (currentGuess.length < NUMBER_LETTERS) {
-            guessError.value = AppStrings(appLanguage.value).notEnoughLetters
+        if (currentGuess.length < wordLength.value) {
+            guessError.value = AppStrings(appLanguage.value).notEnoughLetters(wordLength.value)
             return
         }
         if (!isValidWord(currentGuess)) {
@@ -406,8 +525,8 @@ class WordMasterService(
         if (isGameFinished()) return
 
         val currentGuess = boardGuesses.value[currentGuessAttempt].joinToString("")
-        if (currentGuess.length < NUMBER_LETTERS) {
-            guessError.value = AppStrings(appLanguage.value).notEnoughLetters
+        if (currentGuess.length < wordLength.value) {
+            guessError.value = AppStrings(appLanguage.value).notEnoughLetters(wordLength.value)
             return
         }
 
@@ -459,15 +578,15 @@ class WordMasterService(
     }
 
     private fun setCurrentGuess(word: String) {
-        val letters = word.uppercase().take(NUMBER_LETTERS)
-        for (index in 0 until NUMBER_LETTERS) {
+        val letters = word.uppercase().take(wordLength.value)
+        for (index in 0 until wordLength.value) {
             setGuess(currentGuessAttempt, index, letters.getOrNull(index)?.toString() ?: "")
         }
     }
 
     fun checkGuess() {
         val currentGuess = boardGuesses.value[currentGuessAttempt].joinToString("")
-        if (currentGuess.length == NUMBER_LETTERS) {
+        if (currentGuess.length == wordLength.value) {
             val status = checkWord(currentGuess)
 
             val currentStatusCopy = ArrayList(boardStatus.value)
@@ -546,12 +665,12 @@ class WordMasterService(
     }
 
     private fun checkWord(guess: String): ArrayList<LetterStatus> {
-        val letterStatusList = arrayListOf(NOT_IN_WORD, NOT_IN_WORD, NOT_IN_WORD, NOT_IN_WORD, NOT_IN_WORD)
+        val letterStatusList = ArrayList(List(wordLength.value) { NOT_IN_WORD })
 
         val unusedAnswerLetters = answer.toMutableList()
 
         // check correct positions
-        for (index in 0 until NUMBER_LETTERS) {
+        for (index in 0 until wordLength.value) {
             val letter = guess[index]
             if (letter == answer[index]) {
                 letterStatusList[index] = CORRECT_POSITION
@@ -560,7 +679,7 @@ class WordMasterService(
         }
 
         // check letters in incorrect position
-        for (index in 0 until NUMBER_LETTERS) {
+        for (index in 0 until wordLength.value) {
             if (letterStatusList[index] == CORRECT_POSITION) continue
 
             val letter = guess[index]
@@ -570,24 +689,16 @@ class WordMasterService(
             }
         }
 
+
         return letterStatusList
     }
 
-
-    private fun readWords(path: Path) {
-        // an error will be shown in IDE for now until https://github.com/square/okio/pull/980
-        // is resolved....but will build/run ok
-        FileSystem.SYSTEM.read(path) {
-            while (true) {
-                val word = this.readUtf8Line() ?: break
-                validWords.add(word)
-                validWordsSet.add(word.uppercase())
-            }
-        }
-    }
-
     companion object {
-        const val NUMBER_LETTERS = 5
+        /** Default word length (5-letter Wordle). */
+        const val DEFAULT_WORD_LENGTH = 5
         const val MAX_NUMBER_OF_GUESSES = 6
+
+        /** Supported word lengths players can choose from. */
+        val SUPPORTED_LENGTHS = listOf(3, 4, 5, 6)
     }
 }

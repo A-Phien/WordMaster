@@ -22,10 +22,12 @@ data class AppStrings(val language: AppLanguage) {
     val settingsTitle get() = if (language == AppLanguage.VI) "Cài đặt"   else "Settings"
 
     // ── HomeScreen ────────────────────────────────────────────────────────────
-    val guessHiddenWord get() = if (language == AppLanguage.VI) "Đoán từ bí mật"  else "Guess the hidden word"
-    val playNow         get() = if (language == AppLanguage.VI) "Chơi Ngay"        else "Play Now"
-    val stats           get() = if (language == AppLanguage.VI) "Thống kê"         else "Stats"
-    val settings        get() = if (language == AppLanguage.VI) "Cài đặt"          else "Settings"
+    val guessHiddenWord  get() = if (language == AppLanguage.VI) "Đoán từ bí mật"  else "Guess the hidden word"
+    val playNow          get() = if (language == AppLanguage.VI) "Chơi Ngay"        else "Play Now"
+    val stats            get() = if (language == AppLanguage.VI) "Thống kê"         else "Stats"
+    val settings         get() = if (language == AppLanguage.VI) "Cài đặt"          else "Settings"
+    val wordLengthLabel  get() = if (language == AppLanguage.VI) "Số ký tự"         else "Word length"
+    fun letters(n: Int)  =      if (language == AppLanguage.VI) "$n chữ"           else "$n wrs"
 
     // ── Stat labels (HomeScreen + StatsScreen) ────────────────────────────────
     val played         get() = if (language == AppLanguage.VI) "Đã chơi"         else "Played"
@@ -42,12 +44,13 @@ data class AppStrings(val language: AppLanguage) {
     val score    get() = if (language == AppLanguage.VI) "Điểm số"     else "Score"
     val newGame  get() = if (language == AppLanguage.VI) "Ván mới"     else "New Game"
     val viewStats get() = if (language == AppLanguage.VI) "Xem thống kê" else "Stats"
-    val answerLabel get() = if (language == AppLanguage.VI) "Đáp án: "   else "Answer: "
+    val answerLabel  get() = if (language == AppLanguage.VI) "Đáp án: "    else "Answer: "
+    val showAnswer   get() = if (language == AppLanguage.VI) "Xem đáp án"  else "Reveal Answer"
     val devTools get() = if (language == AppLanguage.VI) "Dev Tools"   else "Dev Tools"
     val hideDevTools get() = if (language == AppLanguage.VI) "Ẩn Dev Tools" else "Hide Dev Tools"
 
     // ── Guess errors (also used in shared WordMasterService) ──────────────────
-    val notEnoughLetters get() = if (language == AppLanguage.VI) "Chưa đủ 5 chữ cái"        else "Not enough letters"
+    fun notEnoughLetters(n: Int) = if (language == AppLanguage.VI) "Chưa đủ $n chữ cái" else "Not enough letters ($n)"
     val notInWordList    get() = if (language == AppLanguage.VI) "Từ không có trong từ điển" else "Not in word list"
 
     // ── ResultSheet ───────────────────────────────────────────────────────────
