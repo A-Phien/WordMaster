@@ -42,6 +42,15 @@ android {
 
     buildTypes {
         getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        getByName("debug") {
+            // Giữ debug build nhanh nhưng vẫn tối ưu
             isMinifyEnabled = false
         }
     }
@@ -51,8 +60,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
-
-
 
 dependencies {
     implementation(project(":shared"))
@@ -67,5 +74,5 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.coil.compose)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

@@ -46,45 +46,40 @@ private enum class AppScreen {
 fun WordMasterApp() {
     val context = LocalContext.current
 
+    // ── Khởi động SoundManager (BGM + SFX) ───────────────────────────────────
+    remember { SoundManager.init(context) }
+
     // ── Service & Stores ─────────────────────────────────────────────────────
     val wordMasterService = remember {
         val wordsDir = context.filesDir.absolutePath
 
-        // ── Step 1: Copy files needed immediately (sync) ──────────────────────
-        // words.txt (5-letter valid guesses) is needed before WordMasterService starts.
-        // targets_5.txt ALWAYS overwritten to ensure the latest clean version is used.
-        val wordsFile = java.io.File(wordsDir, "words.txt")
-        if (!wordsFile.exists()) {
-            try {
-                context.assets.open("words.txt").use { i ->
-                    wordsFile.outputStream().use { o -> i.copyTo(o) }
-                }
-            } catch (_: Exception) {}
-        }
-        // Always overwrite targets_5.txt (ensures BOM-free version from latest assets)
-        try {
-            context.assets.open("targets_5.txt").use { i ->
-                java.io.File(wordsDir, "targets_5.txt").outputStream().use { o -> i.copyTo(o) }
+        // ── Step 1: Copy files with 8KB buffer for instant cold start ────────
+        fun copyAssetFast(assetName: String, destFile: java.io.File, forceOverwrite: Boolean = false) {
+            if (forceOverwrite || !destFile.exists()) {
+                try {
+                    context.assets.open(assetName).buffered(8192).use { input ->
+                        destFile.outputStream().buffered(8192).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                } catch (_: Exception) {}
             }
-        } catch (_: Exception) {}
+        }
+
+        val wordsFile = java.io.File(wordsDir, "words.txt")
+        copyAssetFast("words.txt", wordsFile, forceOverwrite = false)
+
+        val targets5File = java.io.File(wordsDir, "targets_5.txt")
+        copyAssetFast("targets_5.txt", targets5File, forceOverwrite = !targets5File.exists())
 
         // ── Step 2: Copy remaining word lists in background ────────────────────
         Thread {
             listOf("words_3.txt", "words_4.txt", "words_6.txt").forEach { name ->
-                val dest = java.io.File(wordsDir, name)
-                if (!dest.exists()) {
-                    try {
-                        context.assets.open(name).use { i -> dest.outputStream().use { o -> i.copyTo(o) } }
-                    } catch (_: Exception) {}
-                }
+                copyAssetFast(name, java.io.File(wordsDir, name), forceOverwrite = false)
             }
-            // Always overwrite other targets files too
             listOf("targets_3.txt", "targets_4.txt", "targets_6.txt").forEach { name ->
-                try {
-                    context.assets.open(name).use { i ->
-                        java.io.File(wordsDir, name).outputStream().use { o -> i.copyTo(o) }
-                    }
-                } catch (_: Exception) {}
+                val dest = java.io.File(wordsDir, name)
+                copyAssetFast(name, dest, forceOverwrite = !dest.exists())
             }
         }.start()
 
@@ -166,7 +161,7 @@ fun WordMasterApp() {
             if (currentScreen != AppScreen.Home && !isLoadingWords) {
                 WordMasterTopAppBar(
                     title = when (currentScreen) {
-                        AppScreen.Home     -> "WordMaster"
+                        AppScreen.Home     -> "Word Master"
                         AppScreen.Game     -> strings.gameTitle
                         AppScreen.Stats    -> strings.statsTitle
                         AppScreen.Settings -> strings.settingsTitle

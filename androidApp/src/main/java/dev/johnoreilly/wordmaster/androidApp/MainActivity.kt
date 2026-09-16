@@ -17,4 +17,19 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        SoundManager.resumeBgm()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        SoundManager.pauseBgm()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        SoundManager.release()
+    }
 }

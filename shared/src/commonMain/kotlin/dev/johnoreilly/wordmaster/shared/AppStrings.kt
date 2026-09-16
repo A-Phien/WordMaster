@@ -92,6 +92,10 @@ data class AppStrings(val language: AppLanguage) {
     val animationDesc       get() = if (language == AppLanguage.VI) "Hiệu ứng lật ô và rung hàng"   else "Keep tile feedback and row shake effects enabled."
     val hardModeSetting     get() = if (language == AppLanguage.VI) "Chế độ khó"                    else "Hard mode"
     val hardModeDesc        get() = if (language == AppLanguage.VI) "Quy tắc Wordle nghiêm ngặt hơn" else "Reserved for stricter Wordle-style rules."
+    val musicSetting        get() = if (language == AppLanguage.VI) "Nhạc nền"                      else "Background Music"
+    val musicDesc           get() = if (language == AppLanguage.VI) "Nhạc Lofi Piano thư giãn khi chơi game" else "Play relaxing Lofi Piano music during gameplay"
+    val sfxSetting          get() = if (language == AppLanguage.VI) "Hiệu ứng âm thanh"             else "Sound Effects"
+    val sfxDesc             get() = if (language == AppLanguage.VI) "Âm thanh gõ phím, lật ô, chuông thắng/thua" else "Play sound on clicks, tile flips, and win/loss"
 
     // ── Online word validation ────────────────────────────────────────────────
     val checkingWord get() = if (language == AppLanguage.VI) "Đang kiểm tra từ điển online…" else "Checking online dictionary…"

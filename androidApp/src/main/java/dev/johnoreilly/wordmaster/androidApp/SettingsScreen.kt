@@ -37,6 +37,8 @@ fun SettingsScreen(
     currentLanguage: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit
 ) {
+    var musicEnabled      by remember { mutableStateOf(SoundManager.isMusicEnabled) }
+    var sfxEnabled        by remember { mutableStateOf(SoundManager.isSfxEnabled) }
     var animationsEnabled by remember { mutableStateOf(true) }
     var hardModeEnabled   by remember { mutableStateOf(false) }
 
@@ -54,6 +56,28 @@ fun SettingsScreen(
             current     = currentLanguage,
             strings     = strings,
             onChange    = onLanguageChange
+        )
+
+        // ── Music toggle ──────────────────────────────────────────────────────
+        SettingsRow(
+            title         = "🎵  " + strings.musicSetting,
+            description   = strings.musicDesc,
+            checked       = musicEnabled,
+            onCheckedChange = {
+                musicEnabled = it
+                SoundManager.isMusicEnabled = it
+            }
+        )
+
+        // ── SFX toggle ────────────────────────────────────────────────────────
+        SettingsRow(
+            title         = "🔔  " + strings.sfxSetting,
+            description   = strings.sfxDesc,
+            checked       = sfxEnabled,
+            onCheckedChange = {
+                sfxEnabled = it
+                SoundManager.isSfxEnabled = it
+            }
         )
 
         // ── Animations toggle ─────────────────────────────────────────────────

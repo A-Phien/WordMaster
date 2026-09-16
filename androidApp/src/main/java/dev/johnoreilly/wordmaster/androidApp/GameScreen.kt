@@ -91,11 +91,22 @@ fun GameScreen(
         }
         val rowToFlip = scoredRowsCount - 1
         animatingRowIndex = rowToFlip
-        val waitMs = (wordMasterService.wordLength.value - 1) * 120L + 300L
-        kotlinx.coroutines.delay(waitMs)
+        val wordLen = wordMasterService.wordLength.value
+
+        // Phát âm thanh lật từng ô theo hiệu ứng lật
+        for (i in 0 until wordLen) {
+            SoundManager.playFlip()
+            kotlinx.coroutines.delay(120L)
+        }
+        kotlinx.coroutines.delay(180L)
         animatingRowIndex = null
         if (gameStatus != GameStatus.PLAYING) {
             showResult = true
+            if (gameStatus == GameStatus.WON) {
+                SoundManager.playWin()
+            } else if (gameStatus == GameStatus.LOST) {
+                SoundManager.playLose()
+            }
         }
     }
 
@@ -109,6 +120,9 @@ fun GameScreen(
         }
         delay(400L)   // brief pause so it feels intentional, not jarring
         showResult = true
+        if (gameStatus == GameStatus.LOST) {
+            SoundManager.playLose()
+        }
     }
     // ────────────────────────────────────────────────────────────────────────
 
@@ -119,14 +133,29 @@ fun GameScreen(
     LaunchedEffect(scoredRowsCount, gameStatus) {
         if (gameStatus != GameStatus.PLAYING) {
             timeLeft = GUESS_TIMER_SECONDS   // reset display when game ends
+            SoundManager.setPanicMode(false)
             return@LaunchedEffect
         }
         timeLeft = GUESS_TIMER_SECONDS
+
+        // Kiểm tra xem có đang ở lượt đoán cuối cùng (lượt 6/6) không
+        val isLastAttempt = wordMasterService.currentGuessAttempt >= WordMasterService.MAX_NUMBER_OF_GUESSES - 1
+        if (isLastAttempt) {
+            SoundManager.setPanicMode(true)
+        }
+
         while (timeLeft > 0) {
             delay(1000L)
             timeLeft--
+
+            // Khi còn <= 10 giây: bật nhạc dồn dập và phát tiếng gõ tích tắc
+            if (timeLeft in 1..10) {
+                SoundManager.setPanicMode(true)
+                SoundManager.playTick(timeLeft)
+            }
         }
         // Time's up — burn this attempt
+        SoundManager.setPanicMode(false)
         wordMasterService.timeoutGuess()
     }
     // ─────────────────────────────────────────────────────────────────────────
@@ -134,6 +163,7 @@ fun GameScreen(
     val shakeOffset = remember { Animatable(0f) }
     LaunchedEffect(guessError) {
         val error = guessError ?: return@LaunchedEffect
+        SoundManager.playError()
         snackbarHostState.showSnackbar(error)
         val shift = 16f
         for (step in listOf(-shift, shift, -shift, shift, -shift / 2, shift / 2, 0f)) {
@@ -168,43 +198,9 @@ fun GameScreen(
                 )
             }
 
-            // ── Countdown timer bar ───────────────────────────────────────────
+            // ── Countdown timer bar (isolated to prevent full-screen recomposition) ──
             if (gameStatus == GameStatus.PLAYING) {
-                val timerColor = when {
-                    timeLeft > 30 -> Color(0xFF2E7D32)   // 🟢 xanh — nhiều giờ
-                    timeLeft > 10 -> Color(0xFFCC8800)   // 🟡 vàng — sắp hết
-                    else          -> Color(0xFFC62828)   // 🔴 đỏ — nguy hiểm
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Progress track
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0x22000000))
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxWidth(timeLeft.toFloat() / GUESS_TIMER_SECONDS)
-                                .fillMaxHeight()
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(timerColor)
-                        )
-                    }
-                    // Seconds label
-                    Text(
-                        text = "${timeLeft}s",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = timerColor,
-                        modifier = Modifier.width(32.dp)
-                    )
-                }
+                CountdownTimerBar(timeLeft = timeLeft)
             }
 
             Card(
@@ -268,13 +264,19 @@ fun GameScreen(
             Keyboard(
                 keyStatus = keyStatus,
                 enabled = !isValidatingWord,
-                onLetter = { wordMasterService.addLetter(it) },
+                onLetter = {
+                    SoundManager.playClick()
+                    wordMasterService.addLetter(it)
+                },
                 onEnter = {
                     coroutineScope.launch {
                         wordMasterService.submitGuessAsync()
                     }
                 },
-                onDelete = { wordMasterService.removeLetter() }
+                onDelete = {
+                    SoundManager.playDelete()
+                    wordMasterService.removeLetter()
+                }
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -333,6 +335,43 @@ fun GameScreen(
                 }
             },
             onDismiss = { showHintDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun CountdownTimerBar(timeLeft: Int) {
+    val timerColor = when {
+        timeLeft > 30 -> Color(0xFF2E7D32)   // 🟢 xanh — nhiều giờ
+        timeLeft > 10 -> Color(0xFFCC8800)   // 🟡 vàng — sắp hết
+        else          -> Color(0xFFC62828)   // 🔴 đỏ — nguy hiểm
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            Modifier
+                .weight(1f)
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0x22000000))
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(timeLeft.toFloat() / GUESS_TIMER_SECONDS)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(timerColor)
+            )
+        }
+        Text(
+            text = "${timeLeft}s",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = timerColor,
+            modifier = Modifier.width(32.dp)
         )
     }
 }
